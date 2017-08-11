@@ -16,10 +16,12 @@ import logging
 import socket
 import six
 
-from flask import Flask
+from flask import Flask, request, redirect
 from flask_admin import Admin, base
 from flask_cache import Cache
 from flask_wtf.csrf import CSRFProtect
+from werkzeug.contrib.fixers import ProxyFix
+
 csrf = CSRFProtect()
 
 import airflow
@@ -38,6 +40,9 @@ def create_app(config=None, testing=False):
     app.config['LOGIN_DISABLED'] = not configuration.getboolean('webserver', 'AUTHENTICATE')
 
     csrf.init_app(app)
+
+    if configuration.has_option('webserver', 'http_proxy') and configuration.getboolean('webserver', 'http_proxy'):
+        app.wsgi_app = ProxyFix(app.wsgi_app)
 
     app.config['TESTING'] = testing
 
@@ -139,6 +144,13 @@ def create_app(config=None, testing=False):
                 importlib.reload(e)
 
         app.register_blueprint(e.api_experimental, url_prefix='/api/experimental')
+
+        @app.before_request
+        def upgrade_to_https():
+            if configuration.has_option("webserver", "force_https") and configuration.getboolean("webserver", "force_https") == True:
+                if not request.is_secure:
+                    url = request.url.replace('http://', 'https://', 1)
+                    return redirect(url, code=301)
 
         @app.context_processor
         def jinja_globals():
